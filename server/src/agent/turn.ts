@@ -50,6 +50,8 @@ export interface TurnTrace {
   recalledMessageIds: string[];
   queries: string[];
   sources: Source[];
+  /** Text of the search results the model saw. */
+  evidence: string[];
   answer: string;
   error?: string;
   timings?: Timings;
@@ -71,7 +73,7 @@ export async function handleTurn(deps: TurnDeps, input: TurnInput, emit: Emit, s
   const registry = new SourceRegistry();
   const recent = deps.store.recentTurns(input.conversationId, HISTORY_TURNS);
   const trivial = isTrivial(input.message);
-  const trace: TurnTrace = { trivial, referencesPast: false, ranges: [], recalledMessageIds: [], queries: [], sources: [], answer: '' };
+  const trace: TurnTrace = { trivial, referencesPast: false, ranges: [], recalledMessageIds: [], queries: [], sources: [], evidence: [], answer: '' };
 
   try {
     const prepared: Prepared = trivial
@@ -105,7 +107,7 @@ export async function handleTurn(deps: TurnDeps, input: TurnInput, emit: Emit, s
       sources,
     });
     const timings: Timings = { firstTokenMs: result.firstTokenMs, totalMs: Date.now() - startedAt, planMs: prepared.planMs, searchMs: prepared.searchMs, rounds: result.rounds };
-    Object.assign(trace, { answer: result.text, sources, timings });
+    Object.assign(trace, { answer: result.text, sources, evidence: registry.texts(), timings });
     emit({
       type: 'done',
       messageId: answerId,

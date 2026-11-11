@@ -8,6 +8,7 @@ import { SearchService } from '../src/search/service';
 import { TavilySearch } from '../src/search/tavily';
 import { openDb } from '../src/store/db';
 import { Store } from '../src/store/repo';
+import { checkUpcoming } from './upcoming';
 
 const IST = 'Asia/Kolkata';
 const TURN_DELAY_MS = Number(process.env.EVAL_DELAY_MS ?? 4000);
@@ -29,6 +30,8 @@ interface Expect {
   admitsNoRecord?: boolean;
   queriesMatch?: RegExp;
   answerMatches?: RegExp;
+  /** If the sources show a scheduled change in the next 30 days, the answer must mention its date. */
+  mentionsUpcoming?: boolean;
 }
 
 interface Step {
@@ -105,8 +108,21 @@ const scenarios: Scenario[] = [
         at: at(0, 9),
         conversation: 'news-1',
         message: 'What is the latest stable release of Node.js right now?',
-        expect: { citations: true, queriesMatch: /node/i },
+        expect: { citations: true, queriesMatch: /node/i, mentionsUpcoming: true },
         rubric: 'Leads with a specific version number, cites a source for it, mentions when it was released or checked, no filler.',
+      },
+    ],
+  },
+  {
+    name: '"what changed" in the latest release',
+    steps: [
+      {
+        at: at(0, 10),
+        conversation: 'release-1',
+        message: 'What changed in the latest PostgreSQL release?',
+        expect: { citations: true, mentionsUpcoming: true },
+        rubric:
+          'Names the newest release and its date and focuses on what it changed; if the sources show a new release scheduled within about a month, says so with the date right after the direct answer. Does not pad with older releases.',
       },
     ],
   },
@@ -162,7 +178,7 @@ interface Check {
   detail?: string;
 }
 
-function runChecks(expect: Expect, trace: TurnTrace, stepIds: string[]): Check[] {
+function runChecks(expect: Expect, trace: TurnTrace, stepIds: string[], now: Date): Check[] {
   const checks: Check[] = [];
   const answer = trace.answer;
   if (trace.error) checks.push({ name: 'no error', ok: false, detail: trace.error.slice(0, 80) });
@@ -190,6 +206,12 @@ function runChecks(expect: Expect, trace: TurnTrace, stepIds: string[]): Check[]
   }
   if (expect.queriesMatch) checks.push({ name: 'search queries', ok: trace.queries.some((q) => expect.queriesMatch!.test(q)) || trace.sources.length > 0 });
   if (expect.answerMatches) checks.push({ name: 'answer content', ok: expect.answerMatches.test(answer) });
+  if (expect.mentionsUpcoming) {
+    // Only applies when the sources actually show something scheduled soon; otherwise there is nothing to mention.
+    const upcoming = checkUpcoming(trace.evidence, answer, now);
+    if (upcoming.applicable) checks.push({ name: 'upcoming change', ok: upcoming.ok, detail: upcoming.detail });
+    else console.log(`          upcoming change: not applicable, ${upcoming.detail}`);
+  }
   return checks;
 }
 
@@ -270,7 +292,7 @@ async function runScenario(scenario: Scenario, search: SearchService): Promise<S
     await background;
     stepIds.push(answerId);
 
-    const checks = runChecks(step.expect, trace, stepIds);
+    const checks = runChecks(step.expect, trace, stepIds, now);
     const verdict = await judge(step, trace, `${scenario.name}. Simulated time: ${step.at} (user timezone ${IST}).`);
     reports.push({ scenario: scenario.name, step: i + 1, message: step.message, checks, verdict, firstTokenMs: trace.timings?.firstTokenMs, answer: trace.answer });
 

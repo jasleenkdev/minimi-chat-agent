@@ -34,6 +34,11 @@ export class SourceRegistry {
     return [...this.byKey.values()].map(({ content: _content, pageDate: _pageDate, ...source }) => source);
   }
 
+  /** The text of every result the model was shown this turn, for evals. */
+  texts(): string[] {
+    return [...this.byKey.values()].map((r) => `${r.title}\n${r.content}`);
+  }
+
   get size(): number {
     return this.byKey.size;
   }
