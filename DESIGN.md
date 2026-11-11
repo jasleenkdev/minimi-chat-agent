@@ -1,6 +1,6 @@
 # Design
 
-The example prompts ("On Monday we shortlisted 5 CRM tools... has any of them changed?") need three things a plain "LLM + search tool" loop does badly: find a past conversation by a relative date, re-check what was said against today's web, and admit when there is no record. So the time-sensitive and memory work happens in code before the model is called. The model writes the answer.
+The example prompts need three things a plain "LLM + search tool" loop does badly: find a past conversation by a relative date, re-check what was said against today's web, and admit when there is no record. So dates, memory and search planning happen before the main model is called. The model writes the answer.
 
 ## Pipeline
 
@@ -19,12 +19,12 @@ POST /api/chat {conversationId, message, timezone}        time stamped by one in
 
 ## Key decisions
 
-- **Dates are resolved by code, not the model.** "On Monday" means the most recent Monday before today in the user's IANA zone. "3 December" in November means last year. Output is explicit half-open ranges. Models guess these wrong around week boundaries and midnight. 26 tests cover a UTC server with an IST user at 00:15, DST, and future phrases.
+- **Dates are resolved by code, not the model.** "On Monday" is the most recent Monday before today in the user's IANA zone, "3 December" asked in November is last year, and the output is explicit [start, end) ranges. Models get this wrong around week boundaries and midnight. 26 tests cover a UTC server with an IST user at 00:15, DST, and future phrases.
 - **Recall is assembled before the model runs and is the only record of the past.** An empty range becomes an explicit `NO RECORD for Tuesday, 3 November 2026` line, so the model says so and asks one question instead of inventing history.
 - **A claims ledger makes "has it changed" checkable.** After each turn, Flash-Lite stores `{entity, attribute, value, sourceUrl, asOf}` rows. On a re-check, code (not the planner) makes sure every recalled product gets a pricing query and a news query since that date. It also lists the exact rows the then-vs-now table must cover, and requires "Could not verify" wherever no fresh source exists.
 - **Planner plus speculative search.** One fast JSON call decides whether to search and writes up to 5 queries. They run in parallel before the main model starts, so its first call already has numbered sources. If the planner fails or times out, the main model decides with its tool. Same answer, one round-trip slower.
 - **Cache-friendly prompt.** The system prompt is byte-stable, followed by one line with the date. Recall and search results go in front of the current user message, so the system prompt and earlier history stay a cacheable prefix.
-- **Honest failure.** Exponential backoff with jitter. A daily quota is never retried: that model cools down and the next model in `MODEL_FALLBACK` takes over. Errors on the first stream chunk are retried, a 120 s turn deadline applies, a client disconnect aborts the model call and pending searches, and if search fails the answer says it could not check the web.
+- **Honest failure.** Backoff with jitter. A daily quota is never retried: that model cools down and the next one in `MODEL_FALLBACK` takes over. A client disconnect aborts the model call and searches, and a failed search turns into "I could not check the web".
 
 ## Measured
 
@@ -48,4 +48,4 @@ Planner 1.3 to 3.5 s; Tavily `basic` 1.5 s median (`fast` is 0.7 s but returns c
 
 ## With another week
 
-Stream the planner's JSON and start each search as soon as its query is complete. Fetch the full vendor pricing page for re-checks instead of extracts. Store claims with normalised numbers and diff them in code. Run evals on a schedule across more phrasings ("the week before last", other locales). Add per-user auth (the `user_id` columns are already there), and compact long conversations into summaries.
+Stream the planner's JSON so each search starts as soon as its query is complete. Fetch the full vendor pricing page for re-checks. Store claims as normalised numbers and diff them in code. Add more eval phrasings ("the week before last", other locales), per-user auth (`user_id` columns already exist), and summaries for long conversations.
