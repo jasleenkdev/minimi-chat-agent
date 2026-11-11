@@ -1,7 +1,8 @@
-export type LLMErrorKind = 'rate_limited' | 'auth' | 'unavailable' | 'bad_request' | 'aborted' | 'unknown';
+export type LLMErrorKind = 'rate_limited' | 'quota_exhausted' | 'auth' | 'unavailable' | 'bad_request' | 'aborted' | 'unknown';
 
 const userMessages: Record<LLMErrorKind, string> = {
   rate_limited: 'The model is rate limited right now. Wait a few seconds and try again.',
+  quota_exhausted: 'The daily free-tier quota for the model is used up. Try again later or set MODEL_MAIN to another model.',
   auth: 'The model API key was rejected. Check the key in .env.',
   unavailable: 'The model is overloaded or unavailable right now. Try again in a moment.',
   bad_request: 'The model rejected the request.',
@@ -24,8 +25,14 @@ export class LLMError extends Error {
     return userMessages[this.kind];
   }
 
+  /** Worth retrying on the same model. A 504 already burned the server's whole deadline, so it is not. */
   get retryable(): boolean {
-    return this.kind === 'rate_limited' || this.kind === 'unavailable';
+    return this.kind === 'rate_limited' || (this.kind === 'unavailable' && this.status !== 504);
+  }
+
+  /** Worth trying a different model. */
+  get canFallback(): boolean {
+    return this.kind === 'rate_limited' || this.kind === 'quota_exhausted' || this.kind === 'unavailable';
   }
 }
 

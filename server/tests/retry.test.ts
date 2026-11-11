@@ -46,3 +46,23 @@ describe('backoffDelay', () => {
     expect(backoffDelay(0, { baseMs: 100, maxMs: 5000 }, 60_000)).toBe(5000);
   });
 });
+
+describe('retry limits', () => {
+  it('does not wait out a server delay longer than the cap', async () => {
+    const fn = vi.fn().mockRejectedValue(new LLMError('rate_limited', '429', 429, 60_000));
+    await expect(withRetry(fn, { baseMs: 1, maxMs: 15_000 })).rejects.toMatchObject({ kind: 'rate_limited' });
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry a 504 on the same model', async () => {
+    const fn = vi.fn().mockRejectedValue(new LLMError('unavailable', 'deadline', 504));
+    await expect(withRetry(fn, { baseMs: 1 })).rejects.toMatchObject({ status: 504 });
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+
+  it('never retries an exhausted daily quota', async () => {
+    const fn = vi.fn().mockRejectedValue(new LLMError('quota_exhausted', 'per day', 429));
+    await expect(withRetry(fn, { baseMs: 1 })).rejects.toMatchObject({ kind: 'quota_exhausted' });
+    expect(fn).toHaveBeenCalledTimes(1);
+  });
+});

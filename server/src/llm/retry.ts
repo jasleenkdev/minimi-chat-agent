@@ -39,6 +39,8 @@ export async function withRetry<T>(fn: () => Promise<T>, options: Partial<RetryO
       return await fn();
     } catch (err) {
       if (!(err instanceof LLMError) || !err.retryable || attempt >= opts.attempts - 1) throw err;
+      // If the server asks for a longer wait than we are willing to hold a user for, fail now and let the caller fall back.
+      if (err.retryAfterMs !== undefined && err.retryAfterMs > opts.maxMs) throw err;
       const delay = backoffDelay(attempt, opts, err.retryAfterMs);
       opts.onRetry?.(err, attempt + 1, delay);
       await sleep(delay, opts.signal);

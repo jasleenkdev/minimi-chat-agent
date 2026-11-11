@@ -13,6 +13,7 @@ const REQUEST_TIMEOUT_MS = 45_000;
 export class GeminiProvider implements LLMProvider {
   readonly name = 'gemini';
   private client: GoogleGenAI;
+  private cooldownUntil = new Map<string, number>();
 
   constructor(private opts: GeminiOptions) {
     // SDK retries are disabled so backoff lives in one place (retry.ts) and stays visible.
@@ -85,35 +86,35 @@ export class GeminiProvider implements LLMProvider {
     }
   }
 
-  /** Retries the primary model with backoff, then tries the fallback model once if the primary is overloaded. */
+  /**
+   * Tries the tier's model with backoff, then the fallback model. A model that reports an exhausted
+   * daily quota is skipped until its reset time, so later turns don't pay for a request we know will fail.
+   */
   private async withFallback<T>(tier: ModelTier, signal: AbortSignal | undefined, call: (model: string) => Promise<T>): Promise<T> {
-    const primary = this.modelFor(tier);
-    const attempt = (model: string, attempts: number) =>
-      withRetry(
-        async () => {
-          try {
-            return await call(model);
-          } catch (err) {
-            throw toLLMError(err);
-          }
-        },
-        {
-          attempts,
-          signal,
-          onRetry: (e, n, ms) => console.warn(`[gemini] ${model} ${e.kind} (${e.status}), retry ${n} in ${ms}ms`),
-        },
-      );
+    const chain = [...new Set([this.modelFor(tier), this.opts.models.fallback].filter((m): m is string => Boolean(m)))];
+    const available = chain.filter((m) => (this.cooldownUntil.get(m) ?? 0) <= Date.now());
+    let lastError: LLMError | undefined;
 
-    try {
-      return await attempt(primary, 3);
-    } catch (err) {
-      const fallback = this.opts.models.fallback;
-      if (err instanceof LLMError && err.kind === 'unavailable' && fallback && fallback !== primary) {
-        console.warn(`[gemini] ${primary} unavailable, falling back to ${fallback}`);
-        return attempt(fallback, 2);
+    for (const model of available.length ? available : chain) {
+      try {
+        return await withRetry(
+          async () => {
+            try {
+              return await call(model);
+            } catch (err) {
+              throw toLLMError(err);
+            }
+          },
+          { attempts: 3, signal, onRetry: (e, n, ms) => console.warn(`[gemini] ${model} ${e.kind} (${e.status}), retry ${n} in ${ms}ms`) },
+        );
+      } catch (err) {
+        if (!(err instanceof LLMError) || !err.canFallback) throw err;
+        lastError = err;
+        if (err.kind === 'quota_exhausted') this.cooldownUntil.set(model, Date.now() + (err.retryAfterMs ?? 60 * 60_000));
+        console.warn(`[gemini] ${model} failed: ${err.kind}`);
       }
-      throw err;
     }
+    throw lastError ?? new LLMError('unavailable', 'no model available');
   }
 }
 
@@ -157,12 +158,15 @@ export function toContents(messages: ChatMessage[]): Content[] {
   return contents;
 }
 
-function toLLMError(err: unknown): LLMError {
+export function toLLMError(err: unknown): LLMError {
   if (err instanceof LLMError) return err;
   if (isAbortError(err)) return new LLMError('aborted', 'aborted');
   if (err instanceof ApiError) {
-    const delay = /"retryDelay":\s*"(\d+(?:\.\d+)?)s"/.exec(err.message);
-    return new LLMError(kindFromStatus(err.status, err.message), err.message, err.status, delay ? Number(delay[1]) * 1000 : undefined);
+    // The error body is JSON nested inside a JSON string, so quotes may arrive escaped.
+    const delay = /retryDelay\\?"\s*:\s*\\?"(\d+(?:\.\d+)?)s/.exec(err.message);
+    const retryAfterMs = delay ? Number(delay[1]) * 1000 : undefined;
+    const kind = err.status === 429 && /PerDay|per day/i.test(err.message) ? 'quota_exhausted' : kindFromStatus(err.status, err.message);
+    return new LLMError(kind, err.message, err.status, retryAfterMs);
   }
   const message = err instanceof Error ? err.message : String(err);
   if (/fetch failed|ECONNRESET|ETIMEDOUT|timed out/i.test(message)) return new LLMError('unavailable', message);
