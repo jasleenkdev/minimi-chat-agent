@@ -94,6 +94,7 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
 async function executeSearch(call: ToolCall, input: AgentInput) {
   const query = typeof call.args.query === 'string' ? call.args.query.trim() : '';
   if (call.name !== 'web_search' || !query) {
+    console.warn(`[agent] unusable tool call ${call.name} ${JSON.stringify(call.args).slice(0, 200)}`);
     return { call, failed: true, content: 'Error: web_search needs a non-empty "query" string.' };
   }
   input.emit({ type: 'status', phase: 'searching', text: `searching: ${query}` });
