@@ -17,7 +17,8 @@ export const config = {
   tavilyApiKey: process.env.TAVILY_API_KEY ?? '',
   modelMain: process.env.MODEL_MAIN,
   modelFast: process.env.MODEL_FAST,
-  modelFallback: process.env.MODEL_FALLBACK,
+  /** Comma-separated, tried in order when the tier's own model is overloaded or out of quota. */
+  modelFallbacks: process.env.MODEL_FALLBACK?.split(',').map((m) => m.trim()).filter(Boolean),
   plannerTimeoutMs: num('PLANNER_TIMEOUT_MS', 3500),
   /** PLANNER=off skips planning and prefetch, leaving every decision to the main model (used to benchmark the difference). */
   plannerEnabled: process.env.PLANNER !== 'off',

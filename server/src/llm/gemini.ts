@@ -5,7 +5,7 @@ import type { ChatMessage, ChatRequest, JsonRequest, LLMProvider, ModelTier, Str
 
 export interface GeminiOptions {
   apiKey: string;
-  models: { main: string; fast: string; fallback?: string };
+  models: { main: string; fast: string; fallbacks: string[] };
 }
 
 const REQUEST_TIMEOUT_MS = 45_000;
@@ -99,7 +99,7 @@ export class GeminiProvider implements LLMProvider {
    * daily quota is skipped until its reset time, so later turns don't pay for a request we know will fail.
    */
   private async withFallback<T>(tier: ModelTier, signal: AbortSignal | undefined, call: (model: string) => Promise<T>): Promise<T> {
-    const chain = [...new Set([this.modelFor(tier), this.opts.models.fallback].filter((m): m is string => Boolean(m)))];
+    const chain = [...new Set([this.modelFor(tier), ...this.opts.models.fallbacks])];
     const available = chain.filter((m) => (this.cooldownUntil.get(m) ?? 0) <= Date.now());
     let lastError: LLMError | undefined;
 

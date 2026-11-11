@@ -17,7 +17,7 @@ export function createLLM(): LLMProvider {
     models: {
       main: config.modelMain ?? 'gemini-3.6-flash',
       fast: config.modelFast ?? 'gemini-3.5-flash-lite',
-      fallback: config.modelFallback ?? 'gemini-3.5-flash-lite',
+      fallbacks: config.modelFallbacks ?? ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite'],
     },
   });
 }
