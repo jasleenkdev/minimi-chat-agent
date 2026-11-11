@@ -30,7 +30,7 @@ Run `npm run seed` once (it takes a minute or two and never runs on its own). It
 
 ## Configuration
 
-Every key and option is listed in `.env.example`. The defaults use the Gemini free tier: `gemini-3.6-flash` for answers and `gemini-3.5-flash-lite` for planning and indexing, with `MODEL_FALLBACK` (Flash-Lite 3.5, then 3.1) tried in order when a model is out of quota or overloaded. `PLANNER_TIMEOUT_MS` (default 1200) is how long a turn waits for the planner before answering without it. `DEV_NOW` pins the server clock to a given time.
+Every key and option is listed in `.env.example`. The defaults use the Gemini free tier: `gemini-3.6-flash` for answers and `gemini-3.5-flash-lite` for planning and indexing, with `MODEL_FALLBACK` (Flash-Lite 3.5, then 3.1) tried in order when a model is out of quota or overloaded. `PLANNER_TIMEOUT_MS` (default 2000) is how long a turn waits for the planner before answering without it. `DEV_NOW` pins the server clock to a given time.
 
 `LLM_PROVIDER=anthropic` selects a second implementation of the same `LLMProvider` interface. It is **untested against the live API**: it is covered only by unit tests against a mocked SDK (`server/tests/anthropic.test.ts`), which check what it sends and how it maps streamed events and errors. Treat it as a reference implementation, not a supported path.
 
