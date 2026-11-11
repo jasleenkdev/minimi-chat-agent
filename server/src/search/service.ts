@@ -81,6 +81,7 @@ export class SearchService {
       return { query, results, cached: false };
     } catch (err) {
       const error = err instanceof SearchError ? err : new SearchError('failed', String(err));
+      if (error.kind !== 'aborted') console.warn(`[search] ${error.kind}: ${error.message}`);
       return { query, results: [], error, cached: false };
     }
   }
