@@ -24,19 +24,21 @@ async function run(question: string) {
   let done: Extract<ServerEvent, { type: 'done' }> | undefined;
   let error: string | undefined;
   const statuses: string[] = [];
-  await handleTurn(deps, { conversationId: crypto.randomUUID(), message: question, timezone: 'Asia/Kolkata' }, (e) => {
+  const { trace } = await handleTurn(deps, { conversationId: crypto.randomUUID(), message: question, timezone: 'Asia/Kolkata' }, (e) => {
     if (e.type === 'done') done = e;
     if (e.type === 'error') error = e.message;
     if (e.type === 'status') statuses.push(e.text);
   }, new AbortController().signal);
   if (process.env.VERBOSE) console.log(question, statuses);
   const t = done?.timings;
-  return { question: question.slice(0, 40), firstTokenMs: t?.firstTokenMs, planMs: t?.planMs, searchMs: t?.searchMs, totalMs: t?.totalMs, rounds: t?.rounds, error };
+  const planned = config.plannerEnabled ? (trace.plan ? 'in time' : 'missed') : '-';
+  return { question: question.slice(0, 40), planned, firstTokenMs: t?.firstTokenMs, planMs: t?.planMs, searchMs: t?.searchMs, totalMs: t?.totalMs, rounds: t?.rounds, error };
 }
 
 const reps = Number(process.env.REPS ?? 1);
 const rows: Awaited<ReturnType<typeof run>>[] = [];
 const byMode: Record<string, number[]> = { on: [], off: [] };
+let plannedInTime = 0;
 // Interleave modes per question so both see the same provider conditions.
 for (let rep = 0; rep < reps; rep++) {
   for (const q of QUESTIONS) {
@@ -45,12 +47,15 @@ for (let rep = 0; rep < reps; rep++) {
       const row = { mode, ...(await run(q)) };
       rows.push(row);
       if (row.firstTokenMs !== undefined) byMode[mode].push(row.firstTokenMs);
+      if (row.planned === 'in time') plannedInTime++;
       await new Promise((r) => setTimeout(r, 3000));
     }
   }
 }
 console.table(rows);
 const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+console.log(`main model ${llm.modelFor('main')}, planner model ${llm.modelFor('fast')}, planner deadline ${config.plannerTimeoutMs}ms, ${reps} reps`);
 for (const mode of ['on', 'off']) {
-  console.log(`planner ${mode}: median first token ${median(byMode[mode])}ms over ${byMode[mode].length} runs (model ${llm.modelFor('main')})`);
+  console.log(`planner ${mode}: median first token ${median(byMode[mode])}ms over ${byMode[mode].length} completed runs`);
 }
+console.log(`planner answered within the deadline in ${plannedInTime} of ${reps * QUESTIONS.length} planner-on runs`);
