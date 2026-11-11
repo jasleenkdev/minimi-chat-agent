@@ -6,6 +6,8 @@ import type { ChatMessage, ChatRequest, JsonRequest, LLMProvider, ModelTier, Str
 export interface AnthropicOptions {
   apiKey: string;
   models: { main: string; fast: string };
+  /** Lets tests pass a fake SDK client; normally built from the key. */
+  client?: Anthropic;
 }
 
 export class AnthropicProvider implements LLMProvider {
@@ -13,7 +15,7 @@ export class AnthropicProvider implements LLMProvider {
   private client: Anthropic;
 
   constructor(private opts: AnthropicOptions) {
-    this.client = new Anthropic({ apiKey: opts.apiKey, maxRetries: 0, timeout: 45_000 });
+    this.client = opts.client ?? new Anthropic({ apiKey: opts.apiKey, maxRetries: 0, timeout: 45_000 });
   }
 
   modelFor(tier: ModelTier): string {
