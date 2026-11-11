@@ -12,7 +12,7 @@ export type ServerEvent =
   | { type: 'status'; phase: StatusPhase; text: string }
   | { type: 'sources'; sources: Source[] }
   | { type: 'token'; text: string }
-  | { type: 'done'; messageId: string; createdAt: string; timings: Timings }
+  | { type: 'done'; messageId: string; createdAt: string; askedAt: string; timings: Timings }
   | { type: 'error'; kind: string; message: string };
 
 export interface Timings {

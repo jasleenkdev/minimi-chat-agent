@@ -88,6 +88,7 @@ export async function handleTurn(deps: TurnDeps, input: TurnInput, emit: Emit, s
       type: 'done',
       messageId: answerId,
       createdAt: answeredAt.toISOString(),
+      askedAt: askedAt.toISOString(),
       timings: { firstTokenMs: result.firstTokenMs, totalMs: Date.now() - startedAt, planMs: prepared.planMs, searchMs: prepared.searchMs, rounds: result.rounds },
     });
 

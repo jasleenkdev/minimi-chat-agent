@@ -1,4 +1,20 @@
-import type { ChatRequestBody, ServerEvent } from '../../shared/types';
+import type { ChatRequestBody, ConversationDTO, MessageDTO, ServerEvent } from '../../shared/types';
+
+export async function listConversations(): Promise<ConversationDTO[]> {
+  const res = await fetch('/api/conversations');
+  if (!res.ok) throw new Error('Could not load conversations');
+  return res.json();
+}
+
+export async function getMessages(conversationId: string): Promise<MessageDTO[]> {
+  const res = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}/messages`);
+  if (!res.ok) throw new Error('Could not load messages');
+  return res.json();
+}
+
+export async function deleteConversation(conversationId: string): Promise<void> {
+  await fetch(`/api/conversations/${encodeURIComponent(conversationId)}`, { method: 'DELETE' });
+}
 
 /** POSTs a message and parses the SSE response by hand, since EventSource only supports GET. */
 export async function streamChat(body: ChatRequestBody, onEvent: (e: ServerEvent) => void, signal: AbortSignal): Promise<void> {
