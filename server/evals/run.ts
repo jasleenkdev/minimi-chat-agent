@@ -237,6 +237,7 @@ interface StepReport {
   checks: Check[];
   verdict?: Verdict;
   firstTokenMs?: number;
+  answer: string;
 }
 
 async function runScenario(scenario: Scenario, search: SearchService): Promise<StepReport[]> {
@@ -263,7 +264,7 @@ async function runScenario(scenario: Scenario, search: SearchService): Promise<S
 
     const checks = runChecks(step.expect, trace, stepIds);
     const verdict = await judge(step, trace, `${scenario.name}. Simulated time: ${step.at} (user timezone ${IST}).`);
-    reports.push({ scenario: scenario.name, step: i + 1, message: step.message, checks, verdict, firstTokenMs: trace.timings?.firstTokenMs });
+    reports.push({ scenario: scenario.name, step: i + 1, message: step.message, checks, verdict, firstTokenMs: trace.timings?.firstTokenMs, answer: trace.answer });
 
     const failed = checks.filter((c) => !c.ok);
     console.log(
