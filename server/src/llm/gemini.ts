@@ -110,6 +110,8 @@ export class GeminiProvider implements LLMProvider {
             try {
               return await call(model);
             } catch (err) {
+              // An abort the caller didn't ask for is the SDK's request timeout: treat it like a 504 and move on.
+              if (isAbortError(err) && !signal?.aborted) throw new LLMError('unavailable', `${model} timed out`, 504);
               throw toLLMError(err);
             }
           },
