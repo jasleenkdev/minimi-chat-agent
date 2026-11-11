@@ -6,6 +6,8 @@ import { formatResults, type SourceRegistry } from './sources';
 
 export const MAX_TOOL_ROUNDS = 4;
 
+const NO_ANSWER = "I couldn't put an answer together this time. Please try again, or rephrase the question.";
+
 export const webSearchTool: ToolSpec = {
   name: 'web_search',
   description:
@@ -40,6 +42,8 @@ export interface AgentResult {
   rounds: number;
   firstTokenMs?: number;
   searchFailures: number;
+  /** False when the model produced no text and the fallback line was used instead. */
+  answered: boolean;
 }
 
 export async function runAgent(input: AgentInput): Promise<AgentResult> {
@@ -51,13 +55,14 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
 
   for (let round = 0; ; round++) {
     const toolsAllowed = input.allowTools && round < MAX_TOOL_ROUNDS;
-    const system = toolsAllowed || !input.allowTools
-      ? input.system
-      : { ...input.system, dynamic: `${input.system.dynamic}\nSearch budget used up: answer now with the results you have, and say what you could not check.` };
+    if (input.allowTools && !toolsAllowed) {
+      // Out of search rounds: a plain user-side instruction is what reliably gets the model to write instead of asking for more tools.
+      messages.push({ role: 'user', content: 'Search budget used up. Answer now using the results above, and say plainly what you could not check.' });
+    }
 
     let roundText = '';
     const calls: ToolCall[] = [];
-    for await (const event of llm.streamChat({ tier: 'main', system, messages, tools: toolsAllowed ? [webSearchTool] : undefined, signal })) {
+    for await (const event of llm.streamChat({ tier: 'main', system: input.system, messages, tools: toolsAllowed ? [webSearchTool] : undefined, signal })) {
       if (event.type === 'text') {
         firstTokenMs ??= Date.now() - input.startedAt;
         roundText += event.text;
@@ -68,7 +73,13 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
     }
     text += roundText;
 
-    if (!calls.length || !toolsAllowed) return { text, rounds: round + 1, firstTokenMs, searchFailures };
+    if (!calls.length || !toolsAllowed) {
+      if (!text.trim()) {
+        text = NO_ANSWER;
+        emit({ type: 'token', text });
+      }
+      return { text, rounds: round + 1, firstTokenMs, searchFailures, answered: text !== NO_ANSWER };
+    }
 
     messages.push({ role: 'assistant', content: roundText, toolCalls: calls });
     const results = await Promise.all(calls.map((call) => executeSearch(call, input)));
