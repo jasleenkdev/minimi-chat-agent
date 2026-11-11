@@ -1,0 +1,8 @@
+node_modules/
+dist/
+data/
+.env
+.env.local
+NOTES-for-me.md
+*.log
+.DS_Store
