@@ -37,12 +37,20 @@ export class GeminiProvider implements LLMProvider {
     };
     const contents = toContents(req.messages);
 
-    const stream = await this.withFallback(req.tier, req.signal, (model) =>
-      this.client.models.generateContentStream({ model, contents, config: { ...config, thinkingConfig: thinkingFor(model, req.tier) } }),
-    );
+    // The first chunk is read inside the retry wrapper: overload errors usually arrive there, before any token is shown.
+    const { iterator, first } = await this.withFallback(req.tier, req.signal, async (model) => {
+      const stream = await this.client.models.generateContentStream({
+        model,
+        contents,
+        config: { ...config, thinkingConfig: thinkingFor(model, req.tier) },
+      });
+      const iterator = stream[Symbol.asyncIterator]();
+      return { iterator, first: await iterator.next() };
+    });
 
     try {
-      for await (const chunk of stream) {
+      for (let next = first; !next.done; next = await iterator.next()) {
+        const chunk = next.value;
         for (const part of chunk.candidates?.[0]?.content?.parts ?? []) {
           if (part.thought) continue;
           if (part.functionCall) yield { type: 'tool_call', call: toToolCall(part) };
@@ -169,6 +177,7 @@ export function toLLMError(err: unknown): LLMError {
     return new LLMError(kind, err.message, err.status, retryAfterMs);
   }
   const message = err instanceof Error ? err.message : String(err);
-  if (/fetch failed|ECONNRESET|ETIMEDOUT|timed out/i.test(message)) return new LLMError('unavailable', message);
+  if (/fetch failed|ECONNRESET|ETIMEDOUT|timed out|UNAVAILABLE|overloaded|high demand/i.test(message)) return new LLMError('unavailable', message);
+  if (/RESOURCE_EXHAUSTED/.test(message)) return new LLMError('rate_limited', message, 429);
   return new LLMError('unknown', message);
 }
