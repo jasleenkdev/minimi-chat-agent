@@ -1,8 +1,10 @@
 import type { ServerEvent } from '../../../shared/types';
 import type { Clock } from '../clock';
 import { LLMError } from '../llm/errors';
-import type { ChatMessage, LLMProvider } from '../llm/types';
+import type { LLMProvider } from '../llm/types';
 import type { SearchService } from '../search/service';
+import { LOCAL_USER, type Store } from '../store/repo';
+import { HISTORY_TURNS, historyMessages } from './history';
 import { runAgent } from './loop';
 import { buildSystem } from './prompt';
 import { SourceRegistry } from './sources';
@@ -11,28 +13,29 @@ export interface TurnDeps {
   llm: LLMProvider;
   search: SearchService;
   clock: Clock;
+  store: Store;
 }
 
 export interface TurnInput {
   conversationId: string;
   message: string;
   timezone: string;
+  userId?: string;
 }
-
-const histories = new Map<string, ChatMessage[]>();
 
 export async function handleTurn(deps: TurnDeps, input: TurnInput, emit: (e: ServerEvent) => void, signal: AbortSignal) {
   const startedAt = Date.now();
-  const now = deps.clock.now();
-  const history = histories.get(input.conversationId) ?? [];
+  const userId = input.userId ?? LOCAL_USER;
+  const askedAt = deps.clock.now();
   const registry = new SourceRegistry();
+  const history = historyMessages(deps.store.recentTurns(input.conversationId, HISTORY_TURNS));
 
   emit({ type: 'status', phase: 'answering', text: 'thinking' });
   try {
     const result = await runAgent({
       llm: deps.llm,
       search: deps.search,
-      system: buildSystem(now, input.timezone),
+      system: buildSystem(askedAt, input.timezone),
       history,
       userContent: input.message,
       registry,
@@ -40,11 +43,21 @@ export async function handleTurn(deps: TurnDeps, input: TurnInput, emit: (e: Ser
       emit,
       startedAt,
     });
-    histories.set(input.conversationId, [...history, { role: 'user', content: input.message }, { role: 'assistant', content: result.text }]);
+
+    const answeredAt = deps.clock.now();
+    const answerId = crypto.randomUUID();
+    deps.store.saveTurn({
+      conversationId: input.conversationId,
+      userId,
+      timezone: input.timezone,
+      question: { id: crypto.randomUUID(), content: input.message, createdAtMs: askedAt.getTime() },
+      answer: { id: answerId, content: result.text, createdAtMs: answeredAt.getTime() },
+      sources: registry.all(),
+    });
     emit({
       type: 'done',
-      messageId: crypto.randomUUID(),
-      createdAt: deps.clock.now().toISOString(),
+      messageId: answerId,
+      createdAt: answeredAt.toISOString(),
       timings: { firstTokenMs: result.firstTokenMs, totalMs: Date.now() - startedAt, rounds: result.rounds },
     });
   } catch (err) {
