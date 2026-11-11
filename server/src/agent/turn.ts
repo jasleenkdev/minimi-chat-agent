@@ -129,7 +129,9 @@ export async function handleTurn(deps: TurnDeps, input: TurnInput, emit: Emit, s
         }).catch((err) => console.warn(`[extract] skipped: ${err instanceof Error ? err.message.slice(0, 120) : err}`));
     return { background, trace };
   } catch (err) {
-    if (!signal.aborted) {
+    if (signal.aborted && isTimeout(signal.reason)) {
+      emit({ type: 'error', kind: 'timeout', message: 'This took too long, so I stopped. Try again, or ask a narrower question.' });
+    } else if (!signal.aborted) {
       const llmError = err instanceof LLMError ? err : undefined;
       console.error('[turn] failed', llmError ? `${llmError.kind} ${llmError.status ?? ''}` : err);
       emit({ type: 'error', kind: llmError?.kind ?? 'unknown', message: llmError?.userMessage ?? 'Something went wrong. Try again.' });
@@ -225,6 +227,10 @@ async function prepare(deps: TurnDeps, input: Required<TurnInput>, ctx: PrepareC
   }
 
   return { userContent: buildUserContent(input.message, { recall, prefetched, dates: ranges, notes }, input.timezone), planMs, searchMs };
+}
+
+function isTimeout(reason: unknown): boolean {
+  return reason instanceof DOMException && reason.name === 'TimeoutError';
 }
 
 function uniqueRanges(ranges: DateRange[]): DateRange[] {
