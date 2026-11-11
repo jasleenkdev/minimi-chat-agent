@@ -1,4 +1,4 @@
-import type { ServerEvent } from '../../../shared/types';
+import type { ServerEvent, Source, Timings } from '../../../shared/types';
 import type { Clock } from '../clock';
 import { config } from '../config';
 import { resolveDates, type DateRange } from '../dates/resolve';
@@ -12,7 +12,7 @@ import { extractTurn } from './extract';
 import { isTrivial } from './fastpath';
 import { HISTORY_TURNS, historyMessages } from './history';
 import { runAgent } from './loop';
-import { planTurn } from './planner';
+import { planTurn, type Plan } from './planner';
 import { prefetch } from './prefetch';
 import { isRecheckRequest, mergeQueries, recheckNote, recheckProducts, recheckQueries } from './recheck';
 import { buildSystem, formatInZone } from './prompt';
@@ -41,22 +41,42 @@ interface Prepared {
   searchMs?: number;
 }
 
+/** What the pipeline decided for one turn. Returned for evals and debugging; never sent to the client. */
+export interface TurnTrace {
+  trivial: boolean;
+  plan?: Plan;
+  referencesPast: boolean;
+  ranges: { expression: string; label: string; start: string; end: string }[];
+  recalledMessageIds: string[];
+  queries: string[];
+  sources: Source[];
+  answer: string;
+  error?: string;
+  timings?: Timings;
+}
+
+export interface TurnResult {
+  background: Promise<void>;
+  trace: TurnTrace;
+}
+
 /**
  * Runs one turn end to end. Resolves when the answer is streamed and saved; the returned `background`
  * promise covers post-turn indexing, which the HTTP route never waits for but evals and seeding do.
  */
-export async function handleTurn(deps: TurnDeps, input: TurnInput, emit: Emit, signal: AbortSignal): Promise<{ background: Promise<void> }> {
+export async function handleTurn(deps: TurnDeps, input: TurnInput, emit: Emit, signal: AbortSignal): Promise<TurnResult> {
   const startedAt = Date.now();
   const userId = input.userId ?? LOCAL_USER;
   const askedAt = deps.clock.now();
   const registry = new SourceRegistry();
   const recent = deps.store.recentTurns(input.conversationId, HISTORY_TURNS);
   const trivial = isTrivial(input.message);
+  const trace: TurnTrace = { trivial, referencesPast: false, ranges: [], recalledMessageIds: [], queries: [], sources: [], answer: '' };
 
   try {
     const prepared: Prepared = trivial
       ? { userContent: input.message }
-      : await prepare(deps, { ...input, userId }, { askedAt, recent, registry, emit, signal });
+      : await prepare(deps, { ...input, userId }, { askedAt, recent, registry, emit, signal, trace });
 
     emit({ type: 'status', phase: 'answering', text: registry.size ? `reading ${registry.size} sources` : 'thinking' });
     const result = await runAgent({
@@ -84,12 +104,14 @@ export async function handleTurn(deps: TurnDeps, input: TurnInput, emit: Emit, s
       answer: { id: answerId, content: result.text, createdAtMs: answeredAt.getTime() },
       sources,
     });
+    const timings: Timings = { firstTokenMs: result.firstTokenMs, totalMs: Date.now() - startedAt, planMs: prepared.planMs, searchMs: prepared.searchMs, rounds: result.rounds };
+    Object.assign(trace, { answer: result.text, sources, timings });
     emit({
       type: 'done',
       messageId: answerId,
       createdAt: answeredAt.toISOString(),
       askedAt: askedAt.toISOString(),
-      timings: { firstTokenMs: result.firstTokenMs, totalMs: Date.now() - startedAt, planMs: prepared.planMs, searchMs: prepared.searchMs, rounds: result.rounds },
+      timings,
     });
 
     // Greetings carry nothing worth recalling, so they don't spend a model call on indexing.
@@ -105,14 +127,15 @@ export async function handleTurn(deps: TurnDeps, input: TurnInput, emit: Emit, s
           sources,
           localDate: isoDate(wallClock(askedAt, input.timezone)),
         }).catch((err) => console.warn(`[extract] skipped: ${err instanceof Error ? err.message.slice(0, 120) : err}`));
-    return { background };
+    return { background, trace };
   } catch (err) {
     if (!signal.aborted) {
       const llmError = err instanceof LLMError ? err : undefined;
       console.error('[turn] failed', llmError ? `${llmError.kind} ${llmError.status ?? ''}` : err);
       emit({ type: 'error', kind: llmError?.kind ?? 'unknown', message: llmError?.userMessage ?? 'Something went wrong. Try again.' });
     }
-    return { background: Promise.resolve() };
+    trace.error = err instanceof Error ? err.message.slice(0, 200) : String(err);
+    return { background: Promise.resolve(), trace };
   }
 }
 
@@ -122,6 +145,7 @@ interface PrepareCtx {
   registry: SourceRegistry;
   emit: Emit;
   signal: AbortSignal;
+  trace: TurnTrace;
 }
 
 /** Dates and recall are deterministic and local; the planner and prefetch are the only network steps before answering. */
@@ -149,6 +173,7 @@ async function prepare(deps: TurnDeps, input: Required<TurnInput>, ctx: PrepareC
       signal,
     });
     planMs = Date.now() - t;
+    ctx.trace.plan = plan;
   }
 
   const referencesPast = cuePast || plan?.referencesPast === true;
@@ -162,6 +187,11 @@ async function prepare(deps: TurnDeps, input: Required<TurnInput>, ctx: PrepareC
     const data = gatherRecall(deps.store, input.userId, ranges, [plan?.recallQuery, input.message].filter(Boolean).join(' '), nowMs);
     recall = formatRecall(data, input.timezone);
     recalled = recalledTurns(data);
+    Object.assign(ctx.trace, {
+      referencesPast,
+      ranges: ranges.map((r) => ({ expression: r.expression, label: r.label, start: r.start.toISOString(), end: r.end.toISOString() })),
+      recalledMessageIds: recalled.map((t) => t.assistantMessageId),
+    });
   }
 
   const notes: string[] = [];
@@ -176,6 +206,7 @@ async function prepare(deps: TurnDeps, input: Required<TurnInput>, ctx: PrepareC
 
   let prefetched: string | undefined;
   let searchMs: number | undefined;
+  ctx.trace.queries = queries.map((q) => q.query);
   if (queries.length) {
     const t = Date.now();
     const result = await prefetch(deps.search, ctx.registry, queries, {
