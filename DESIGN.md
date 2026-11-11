@@ -37,7 +37,8 @@ Time to first token, planner on vs off, `gemini-3.5-flash-lite` in both arms. Ea
 | --- | --- | --- | --- |
 | 1.2 s | 6.5 s (8 of 9 ran) | 6.6 s (7 of 9) | 0 of 9 |
 | 2.0 s (default) | **5.0 s** (9 of 9) | 8.5 s (9 of 9) | 5 of 9 |
-| 3.5 s (earlier run, before the race) | 4.4 s (7 of 9) | 6.6 s (9 of 9) | not recorded |
+
+The on/off arms are interleaved within a row, so compare within a row, not across rows: the rows ran at different times, and the identical "off" arm measured 6.6 s in one and 8.5 s in the other, which shows how noisy the free tier is.
 
 Healthy planner calls take 1.6 to 2.0 s, so at 1.2 s it never finished and was pure overhead. In time, a turn usually needs 1 main-model call instead of 2 or 3. Nine runs per arm on a noisy free tier: direction, not precise effect sizes.
 
