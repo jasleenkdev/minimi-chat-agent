@@ -8,11 +8,13 @@ import type { LLMProvider } from '../llm/types';
 import type { SearchService } from '../search/service';
 import { LOCAL_USER, type Store, type Turn } from '../store/repo';
 import { buildUserContent } from './context';
+import { extractTurn } from './extract';
 import { isTrivial } from './fastpath';
 import { HISTORY_TURNS, historyMessages } from './history';
 import { runAgent } from './loop';
 import { planTurn } from './planner';
 import { prefetch } from './prefetch';
+import { isRecheckRequest, mergeQueries, recheckNote, recheckProducts, recheckQueries } from './recheck';
 import { buildSystem, formatInZone } from './prompt';
 import { formatRecall, gatherRecall, mentionsPastConversation, recallRanges, recalledTurns } from './recall';
 import { SourceRegistry } from './sources';
@@ -39,7 +41,11 @@ interface Prepared {
   searchMs?: number;
 }
 
-export async function handleTurn(deps: TurnDeps, input: TurnInput, emit: Emit, signal: AbortSignal): Promise<void> {
+/**
+ * Runs one turn end to end. Resolves when the answer is streamed and saved; the returned `background`
+ * promise covers post-turn indexing, which the HTTP route never waits for but evals and seeding do.
+ */
+export async function handleTurn(deps: TurnDeps, input: TurnInput, emit: Emit, signal: AbortSignal): Promise<{ background: Promise<void> }> {
   const startedAt = Date.now();
   const userId = input.userId ?? LOCAL_USER;
   const askedAt = deps.clock.now();
@@ -68,13 +74,15 @@ export async function handleTurn(deps: TurnDeps, input: TurnInput, emit: Emit, s
 
     const answeredAt = deps.clock.now();
     const answerId = crypto.randomUUID();
-    deps.store.saveTurn({
+    const sources = registry.all();
+    // A turn the model never answered is not history: storing it would make recall report a conversation that did not happen.
+    if (result.answered) deps.store.saveTurn({
       conversationId: input.conversationId,
       userId,
       timezone: input.timezone,
       question: { id: crypto.randomUUID(), content: input.message, createdAtMs: askedAt.getTime() },
       answer: { id: answerId, content: result.text, createdAtMs: answeredAt.getTime() },
-      sources: registry.all(),
+      sources,
     });
     emit({
       type: 'done',
@@ -82,11 +90,28 @@ export async function handleTurn(deps: TurnDeps, input: TurnInput, emit: Emit, s
       createdAt: answeredAt.toISOString(),
       timings: { firstTokenMs: result.firstTokenMs, totalMs: Date.now() - startedAt, planMs: prepared.planMs, searchMs: prepared.searchMs, rounds: result.rounds },
     });
+
+    // Greetings carry nothing worth recalling, so they don't spend a model call on indexing.
+    const background = trivial || !result.answered
+      ? Promise.resolve()
+      : extractTurn({
+          llm: deps.llm,
+          store: deps.store,
+          userId,
+          assistantMessageId: answerId,
+          question: input.message,
+          answer: result.text,
+          sources,
+          localDate: isoDate(wallClock(askedAt, input.timezone)),
+        }).catch((err) => console.warn(`[extract] skipped: ${err instanceof Error ? err.message.slice(0, 120) : err}`));
+    return { background };
   } catch (err) {
-    if (signal.aborted) return;
-    const llmError = err instanceof LLMError ? err : undefined;
-    console.error('[turn] failed', err);
-    emit({ type: 'error', kind: llmError?.kind ?? 'unknown', message: llmError?.userMessage ?? 'Something went wrong. Try again.' });
+    if (!signal.aborted) {
+      const llmError = err instanceof LLMError ? err : undefined;
+      console.error('[turn] failed', llmError ? `${llmError.kind} ${llmError.status ?? ''}` : err);
+      emit({ type: 'error', kind: llmError?.kind ?? 'unknown', message: llmError?.userMessage ?? 'Something went wrong. Try again.' });
+    }
+    return { background: Promise.resolve() };
   }
 }
 
@@ -139,12 +164,21 @@ async function prepare(deps: TurnDeps, input: Required<TurnInput>, ctx: PrepareC
   }
 
   const notes: string[] = [];
+  let queries = plan?.needsSearch ? plan.searchQueries : [];
+  const products = referencesPast && isRecheckRequest(input.message) ? recheckProducts(recalled) : [];
+  if (products.length) {
+    // Runs even when the planner timed out: the recalled products are enough to know what to check.
+    const monthYear = new Intl.DateTimeFormat('en-US', { month: 'long', year: 'numeric', timeZone: input.timezone }).format(askedAt);
+    queries = mergeQueries(recheckQueries(products, monthYear), queries);
+    notes.push(recheckNote(recalled, products));
+  }
+
   let prefetched: string | undefined;
   let searchMs: number | undefined;
-  if (plan?.needsSearch) {
+  if (queries.length) {
     const t = Date.now();
-    const result = await prefetch(deps.search, ctx.registry, plan.searchQueries, {
-      freshness: plan.freshness,
+    const result = await prefetch(deps.search, ctx.registry, queries, {
+      freshness: plan?.freshness ?? 'any',
       since: earliestLocalDate(recalled, input.timezone),
       checkedAt: formatInZone(askedAt, input.timezone),
       signal,
