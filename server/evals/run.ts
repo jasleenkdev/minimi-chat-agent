@@ -251,14 +251,22 @@ async function runScenario(scenario: Scenario, search: SearchService): Promise<S
   for (const [i, step] of scenario.steps.entries()) {
     now = new Date(step.at);
     let answerId = '';
-    const { background, trace } = await handleTurn(
-      deps,
-      { conversationId: step.conversation, message: step.message, timezone: IST },
-      (e: ServerEvent) => {
-        if (e.type === 'done') answerId = e.messageId;
-      },
-      new AbortController().signal,
-    );
+    const runStep = () =>
+      handleTurn(
+        deps,
+        { conversationId: step.conversation, message: step.message, timezone: IST },
+        (e: ServerEvent) => {
+          if (e.type === 'done') answerId = e.messageId;
+        },
+        new AbortController().signal,
+      );
+    let { background, trace } = await runStep();
+    // A free-tier 503 says nothing about the agent; give the provider one more chance before scoring.
+    if (trace.error) {
+      console.log(`  step ${i + 1}: provider error, retrying once in 20s`);
+      await new Promise((r) => setTimeout(r, 20_000));
+      ({ background, trace } = await runStep());
+    }
     await background;
     stepIds.push(answerId);
 
