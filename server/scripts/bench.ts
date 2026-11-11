@@ -23,19 +23,34 @@ async function run(question: string) {
   const deps = { llm, search: new SearchService(new TavilySearch(config.tavilyApiKey)), clock: systemClock, store };
   let done: Extract<ServerEvent, { type: 'done' }> | undefined;
   let error: string | undefined;
+  const statuses: string[] = [];
   await handleTurn(deps, { conversationId: crypto.randomUUID(), message: question, timezone: 'Asia/Kolkata' }, (e) => {
     if (e.type === 'done') done = e;
     if (e.type === 'error') error = e.message;
+    if (e.type === 'status') statuses.push(e.text);
   }, new AbortController().signal);
-  return { question, firstTokenMs: done?.timings.firstTokenMs, totalMs: done?.timings.totalMs, rounds: done?.timings.rounds, error };
+  if (process.env.VERBOSE) console.log(question, statuses);
+  const t = done?.timings;
+  return { question: question.slice(0, 40), firstTokenMs: t?.firstTokenMs, planMs: t?.planMs, searchMs: t?.searchMs, totalMs: t?.totalMs, rounds: t?.rounds, error };
 }
 
-const rows = [];
-for (const q of QUESTIONS) {
-  rows.push(await run(q));
-  await new Promise((r) => setTimeout(r, 4000));
+const reps = Number(process.env.REPS ?? 1);
+const rows: Awaited<ReturnType<typeof run>>[] = [];
+const byMode: Record<string, number[]> = { on: [], off: [] };
+// Interleave modes per question so both see the same provider conditions.
+for (let rep = 0; rep < reps; rep++) {
+  for (const q of QUESTIONS) {
+    for (const mode of ['on', 'off'] as const) {
+      config.plannerEnabled = mode === 'on';
+      const row = { mode, ...(await run(q)) };
+      rows.push(row);
+      if (row.firstTokenMs !== undefined) byMode[mode].push(row.firstTokenMs);
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
 }
 console.table(rows);
-const ok = rows.filter((r) => r.firstTokenMs !== undefined);
-const median = (xs: number[]) => xs.sort((a, b) => a - b)[Math.floor(xs.length / 2)];
-console.log(`mode=${process.env.PLANNER ?? 'on'} median first token ${median(ok.map((r) => r.firstTokenMs!))}ms, median total ${median(ok.map((r) => r.totalMs!))}ms`);
+const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)];
+for (const mode of ['on', 'off']) {
+  console.log(`planner ${mode}: median first token ${median(byMode[mode])}ms over ${byMode[mode].length} runs (model ${llm.modelFor('main')})`);
+}
