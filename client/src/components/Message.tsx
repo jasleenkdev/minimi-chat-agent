@@ -20,7 +20,11 @@ function SourceList({ sources, label }: { sources: Source[]; label: string }) {
           <a href={s.url} target="_blank" rel="noreferrer" title={s.title}>
             <span className="n">{s.n}</span>
             <span className="domain">{s.domain}</span>
-            {s.publishedDate && <span className="date">{s.publishedDate}</span>}
+            {s.publishedDate && (
+              <span className="date" title={`Published ${s.publishedDate}`}>
+                published {s.publishedDate}
+              </span>
+            )}
           </a>
         </li>
       ))}

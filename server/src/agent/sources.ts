@@ -4,6 +4,7 @@ import type { SearchResult } from '../search/types';
 
 export interface NumberedResult extends Source {
   content: string;
+  pageDate?: string;
 }
 
 /** Gives every source a stable number for the whole turn so citations [n] match the list the UI shows. */
@@ -21,6 +22,7 @@ export class SourceRegistry {
         title: r.title,
         domain: domainOf(r.url),
         publishedDate: r.publishedDate,
+        pageDate: r.pageDate,
         content: r.content,
       };
       this.byKey.set(key, numbered);
@@ -29,7 +31,7 @@ export class SourceRegistry {
   }
 
   all(): Source[] {
-    return [...this.byKey.values()].map(({ content: _content, ...source }) => source);
+    return [...this.byKey.values()].map(({ content: _content, pageDate: _pageDate, ...source }) => source);
   }
 
   get size(): number {
@@ -49,7 +51,11 @@ export function formatResults(results: NumberedResult[]): string {
   if (!results.length) return 'No results.';
   return results
     .map((r) => {
-      const date = r.publishedDate ? ` (published ${r.publishedDate})` : '';
+      const date = r.publishedDate
+        ? ` (published ${r.publishedDate})`
+        : r.pageDate
+          ? ` (date unconfirmed: published or last updated around ${r.pageDate})`
+          : ' (publish date unknown)';
       return `[${r.n}] ${r.title} — ${r.domain}${date}\nURL: ${r.url}\n${r.content}`;
     })
     .join('\n\n');

@@ -15,7 +15,10 @@ export interface SearchResult {
   url: string;
   title: string;
   content: string;
+  /** YYYY-MM-DD, only when it is known to be the publish date. Shown to users. */
   publishedDate?: string;
+  /** YYYY-MM-DD the provider estimates the page was published or last updated. Never shown as a publish date. */
+  pageDate?: string;
   score: number;
 }
 

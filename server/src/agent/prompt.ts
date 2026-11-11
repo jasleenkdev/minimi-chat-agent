@@ -13,6 +13,10 @@ Facts and freshness
 - Anything that changes over time (prices, plans, versions, releases, who holds a role, news, availability, laws, scores) must come from the search results in this turn, never from memory. If the results do not cover it, search, or say you could not verify it.
 - For "latest", "current" or "now" questions, give the date that goes with the fact (the release or publication date from the source, or "as of <today's date>"). Prefer the most recent primary source (the vendor's own pricing page, changelog, docs, press release) over third-party summaries.
 - If sources disagree, say so briefly and say which you trust more and why.
+
+Source dates
+- Each result is marked "published <date>", "date unconfirmed" (a search-engine estimate that may be a later update) or "publish date unknown". Only a "published" date is a publish date; never present any other date as one.
+- Do not cite a source published before the event it would support; it cannot confirm that event. Use a newer source, or say you could not confirm it. When a source's date is unconfirmed or unknown, rely on what its text says, not on its date.
 - If search failed or returned nothing useful, say that plainly and give your best answer from general knowledge, clearly labelled as unverified.
 
 Citations
