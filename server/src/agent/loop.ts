@@ -31,6 +31,8 @@ export interface AgentInput {
   signal: AbortSignal;
   emit: (event: ServerEvent) => void;
   startedAt: number;
+  /** False on the fast path: a greeting never needs a search. */
+  allowTools: boolean;
 }
 
 export interface AgentResult {
@@ -48,8 +50,8 @@ export async function runAgent(input: AgentInput): Promise<AgentResult> {
   let searchFailures = 0;
 
   for (let round = 0; ; round++) {
-    const toolsAllowed = round < MAX_TOOL_ROUNDS;
-    const system = toolsAllowed
+    const toolsAllowed = input.allowTools && round < MAX_TOOL_ROUNDS;
+    const system = toolsAllowed || !input.allowTools
       ? input.system
       : { ...input.system, dynamic: `${input.system.dynamic}\nSearch budget used up: answer now with the results you have, and say what you could not check.` };
 

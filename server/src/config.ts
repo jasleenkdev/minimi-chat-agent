@@ -14,6 +14,8 @@ export const config = {
   modelFast: process.env.MODEL_FAST,
   modelFallback: process.env.MODEL_FALLBACK,
   plannerTimeoutMs: num('PLANNER_TIMEOUT_MS', 3500),
+  /** PLANNER=off skips planning and prefetch, leaving every decision to the main model (used to benchmark the difference). */
+  plannerEnabled: process.env.PLANNER !== 'off',
   dbPath: process.env.DB_PATH ?? 'data/minimi.db',
   devNow: process.env.DEV_NOW || undefined,
 };
