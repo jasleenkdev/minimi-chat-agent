@@ -68,15 +68,32 @@ export interface PlannerInput {
   signal: AbortSignal;
 }
 
-/** Returns undefined on timeout or any failure; the caller then lets the main model decide with its tool. */
+/**
+ * Races the planner against a deadline. If it has not answered by then the turn goes on without it:
+ * the request is aborted and resolves to undefined, and the main model decides with its tool instead.
+ * The deadline settles the race on its own, so a provider that is slow to honour the abort cannot hold the turn.
+ */
 export async function planTurn(input: PlannerInput): Promise<Plan | undefined> {
-  const signal = AbortSignal.any([input.signal, AbortSignal.timeout(input.timeoutMs)]);
+  const deadline = new AbortController();
+  const signal = AbortSignal.any([input.signal, deadline.signal]);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timedOut = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => {
+      deadline.abort();
+      resolve(undefined);
+    }, input.timeoutMs);
+  });
+  const planned = input.llm
+    .generateJson<Plan>({ tier: 'fast', system: SYSTEM, prompt: plannerPrompt(input), schema: SCHEMA, signal })
+    .then(sanitize)
+    .catch((err) => {
+      if (!signal.aborted) console.warn(`[planner] skipped: ${err instanceof Error ? err.message.slice(0, 120) : err}`);
+      return undefined;
+    });
   try {
-    const plan = await input.llm.generateJson<Plan>({ tier: 'fast', system: SYSTEM, prompt: plannerPrompt(input), schema: SCHEMA, signal });
-    return sanitize(plan);
-  } catch (err) {
-    if (!input.signal.aborted) console.warn(`[planner] skipped: ${err instanceof Error ? err.message.slice(0, 120) : err}`);
-    return undefined;
+    return await Promise.race([planned, timedOut]);
+  } finally {
+    clearTimeout(timer);
   }
 }
 
