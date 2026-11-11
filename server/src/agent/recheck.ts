@@ -52,6 +52,6 @@ export function recheckNote(turns: Turn[], products: string[]): string {
     rows,
     'Lead with a one-sentence verdict. Then a table: Item | What I said then | Now | Changed? | Source. One row per product (combine its plans in one row if that keeps it readable).',
     '"Now" must come from this turn\'s search results with a citation. If no fresh result covers an item, write "Could not verify" and do not claim it is unchanged.',
-    'After the table, list notable launches or announcements since then, with citations, or say none turned up in the search.',
+    `After the table, list notable launches or announcements dated on or after ${dates || 'that date'} (check each result's published date and leave out anything older), with citations, or say none turned up.`,
   ].join('\n');
 }

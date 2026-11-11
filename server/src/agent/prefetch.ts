@@ -30,7 +30,8 @@ export async function prefetch(
         // News re-checks look from the recalled date onward; everything else uses the planner's window.
         startDate: isNews ? opts.since : undefined,
         timeRange: isNews && opts.since ? undefined : timeRange,
-        maxResults: 5,
+        // Many parallel queries (a re-check) keep fewer results each, so the prompt stays small and fast.
+        maxResults: queries.length > 5 ? 3 : 5,
         signal: opts.signal,
       });
     }),
