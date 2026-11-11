@@ -1,3 +1,8 @@
+import { existsSync } from 'node:fs';
+
+// Values already in the environment win over .env, so `MODEL_MAIN=... npm run eval` works as expected.
+if (existsSync('.env')) process.loadEnvFile('.env');
+
 function num(name: string, fallback: number): number {
   const raw = process.env[name];
   const n = raw ? Number(raw) : NaN;

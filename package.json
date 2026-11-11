@@ -8,13 +8,14 @@
   },
   "scripts": {
     "dev": "concurrently -k -n server,client -c blue,green \"npm:dev:server\" \"npm:dev:client\"",
-    "dev:server": "tsx watch --env-file-if-exists=.env server/src/index.ts",
+    "dev:server": "tsx watch server/src/index.ts",
     "dev:client": "vite",
     "build": "vite build",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "eval": "tsx --env-file-if-exists=.env server/evals/run.ts",
-    "seed": "tsx --env-file-if-exists=.env server/scripts/seed.ts"
+    "eval": "tsx server/evals/run.ts",
+    "seed": "tsx server/scripts/seed.ts",
+    "bench": "tsx server/scripts/bench.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^1.8.0",
